@@ -104,7 +104,7 @@ public:
 
 	static inline void row_gemm(const dnnl::engine& eng, dnnl::stream& stream, oneapi::mkl::transpose a_trans,
 		oneapi::mkl::transpose b_trans, int m, int n, int k,
-		const void* a, int lda, dt at, const void* b, int ldb, dt bt, void* c, int ldc, dt ct)
+		const void* a, dt at, const void* b, dt bt, void* c, dt ct)
 	{
 		memory::dims a_dims = { m, k };
 		memory::dims b_dims = { k, n };
@@ -209,8 +209,7 @@ double run_case(engine::kind engine_kind, dt type, gemm_dims_t dims,
 		matmul_prim.execute(engine_stream, matmul_args);
 #else
 		DnnlGemmWrapper::row_gemm(engine, engine_stream, oneapi::mkl::transpose::N, oneapi::mkl::transpose::T
-			, dims.m, dims.n, dims.k, a_in_mem.get_data_handle(), dims.k, type,
-			b_in_mem.get_data_handle(), dims.k, type, c_mem.get_data_handle(), dims.n, type);
+			, dims.m, dims.n, dims.k, a_in_mem.get_data_handle(), type, b_in_mem.get_data_handle(), type, c_mem.get_data_handle(), type);
 #endif
 	engine_stream.wait();
 
