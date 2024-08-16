@@ -249,7 +249,9 @@ double run_mkl_case(gemm_dims_t dims, double time_limit = 0.) {
 
 	// Start output.
 	if (!quick_test) print_test_case(dt::f32, dims);
-
+	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::N, m, n, k, 1.f, a_buf, k, b_buf, n, 0.f
+		, c_buf, n, oneapi::mkl::blas::compute_mode::prefer_alternate);
+	q.wait();
 	auto start_first = std::chrono::steady_clock::now();
 	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::N, m, n, k, 1.f, a_buf, k, b_buf, n, 0.f
 		, c_buf, n, oneapi::mkl::blas::compute_mode::prefer_alternate);
@@ -319,12 +321,16 @@ void run(engine::kind engine_kind, dt type, gemm_dims_t dims,
 
 			dims.m = dims.n = dims.k = mnk;
 			run_case(engine_kind, type, dims, time_limit);
-			if (type == dt::f32)
-			{
-				run_mkl_case<float>(dims, time_limit);
-			} else if (type == dt::f16) {
-				run_mkl_case<sycl::half>(dims, time_limit);
-			}
+		}
+		if (type == dt::f32)
+		{
+			run_mkl_case<float>(dims, time_limit);
+		}
+		else if (type == dt::f16) {
+			run_mkl_case<sycl::half>(dims, time_limit);
+		}
+		else if (type == dt::bf16) {
+			run_mkl_case<oneapi::mkl::bfloat16>(dims, time_limit);
 		}
 	}
 	catch (dnnl::error& e) {
