@@ -247,11 +247,11 @@ double run_mkl_case(gemm_dims_t dims, double time_limit = 0.) {
 
 	// Start output.
 	if (!quick_test) print_test_case(dt::f32, dims);
-	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, n, 0.f
+	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, k, 0.f
 		, c_buf, n, oneapi::mkl::blas::compute_mode::prefer_alternate);
 	q.wait();
 	auto start_first = std::chrono::steady_clock::now();
-	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, n, 0.f
+	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, k, 0.f
 		, c_buf, n, oneapi::mkl::blas::compute_mode::prefer_alternate);
 	q.wait();
 	auto end_first = std::chrono::steady_clock::now();
@@ -266,7 +266,7 @@ double run_mkl_case(gemm_dims_t dims, double time_limit = 0.) {
 	auto start = std::chrono::steady_clock::now();
 
 	for (int i = 0; i <= runs; i++)
-		oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, n, 0.f
+		oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, k, 0.f
 			, c_buf, n, oneapi::mkl::blas::compute_mode::prefer_alternate);
 	q.wait();
 
@@ -443,7 +443,7 @@ void run_check(engine::kind engine_kind, dt type, gemm_dims_t dims) {
 	q.memcpy(a_buf, a_data.data(), m * k * sizeof(float)).wait();
 	q.memcpy(b_buf, b_data.data(), n * k * sizeof(float)).wait();
 	q.memset(c_buf, 0, m * n * sizeof(float)).wait();
-	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, n, 0.f
+	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, k, 0.f
 		, c_buf, n, oneapi::mkl::blas::compute_mode::prefer_alternate);
 	q.wait();
 	q.memcpy(c_data_mkl.data(), c_buf, n * m * sizeof(float)).wait();
@@ -456,7 +456,7 @@ void run_check(engine::kind engine_kind, dt type, gemm_dims_t dims) {
 }
 
 int main(int argc, char** argv) {
-	run_check(engine::kind::gpu, dt::f32, { 1024,1024,1024 });
+	run_check(engine::kind::gpu, dt::f32, { 1024,4096,4096 });
 	return handle_example_errors(
 		matmul_perf, parse_engine_kind(argc, argv, 3), argc, argv);
 }
