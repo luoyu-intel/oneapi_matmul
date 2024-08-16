@@ -91,6 +91,46 @@ void fill_random(std::vector<float>& out, bool is_integer) {
 	}
 }
 
+
+class DnnlGemmWrapper {
+public:
+	template<typename T>
+	static constexpr dt todt() {
+		if constexpr (std::is_same_v<T, float>) return dt::f32;
+		else if constexpr (std::is_same_v<T, sycl::half>) return dt::f16;
+		else if constexpr (std::is_same_v<T, oneapi::mkl::bfloat16>) return dt::bf16;
+		else static_assert(0);
+	}
+
+	static inline void row_gemm(const dnnl::engine& eng, dnnl::stream& stream, oneapi::mkl::transpose a_trans,
+		oneapi::mkl::transpose b_trans, int m, int n, int k,
+		const void* a, int lda, dt at, const void* b, int ldb, dt bt, void* c, int ldc, dt ct)
+	{
+		memory::dims a_dims = { m, k };
+		memory::dims b_dims = { k, n };
+		memory::dims c_dims = { m, n };
+		using trans = oneapi::mkl::transpose;
+		const auto a_in_md = memory::desc(a_dims, at, a_trans == trans::N ? tag::ab : tag::ba);
+		const auto b_in_md = memory::desc(a_dims, bt, b_trans == trans::N ? tag::ab : tag::ba);
+		const auto c_md = memory::desc(c_dims, ct, tag::ab);
+		auto a_mem = memory(a_in_md, eng, (void*)a);
+		auto b_mem = memory(b_in_md, eng, (void*)b);
+		auto matmul_pd = matmul::primitive_desc(eng, a_in_md, b_in_md, c_md);
+		auto c_mem = memory(matmul_pd.dst_desc(), eng, c);
+
+		// Create the primitive.
+		auto matmul_prim = matmul(matmul_pd);
+		// Primitive arguments.
+		std::unordered_map<int, memory> matmul_args;
+		matmul_args.insert({ DNNL_ARG_SRC, a_mem });
+		matmul_args.insert({ DNNL_ARG_WEIGHTS, b_mem });
+		matmul_args.insert({ DNNL_ARG_DST, c_mem });
+
+		// Warmup executions.
+		matmul_prim.execute(stream, matmul_args);
+	}
+};
+
 double run_case(engine::kind engine_kind, dt type, gemm_dims_t dims,
 	double time_limit = 0.) {
 	bool is_integer = (type == dt::s8 || type == dt::u8);
@@ -132,13 +172,6 @@ double run_case(engine::kind engine_kind, dt type, gemm_dims_t dims,
 	// Create primitive descriptor.
 	auto matmul_pd = matmul::primitive_desc(engine, a_in_md, b_in_md, c_md);
 
-	// Repack and convert input data.
-	auto a_mem = memory(matmul_pd.src_desc(), engine);
-	reorder(a_in_mem, a_mem).execute(engine_stream, a_in_mem, a_mem);
-
-	auto b_mem = memory(matmul_pd.weights_desc(), engine);
-	reorder(b_in_mem, b_mem).execute(engine_stream, b_in_mem, b_mem);
-
 	auto c_mem = memory(matmul_pd.dst_desc(), engine);
 
 	// Create the primitive.
@@ -149,8 +182,8 @@ double run_case(engine::kind engine_kind, dt type, gemm_dims_t dims,
 
 	// Primitive arguments.
 	std::unordered_map<int, memory> matmul_args;
-	matmul_args.insert({ DNNL_ARG_SRC, a_mem });
-	matmul_args.insert({ DNNL_ARG_WEIGHTS, b_mem });
+	matmul_args.insert({ DNNL_ARG_SRC, a_in_mem });
+	matmul_args.insert({ DNNL_ARG_WEIGHTS, b_in_mem });
 	matmul_args.insert({ DNNL_ARG_DST, c_mem });
 
 	// Warmup executions.
@@ -172,7 +205,13 @@ double run_case(engine::kind engine_kind, dt type, gemm_dims_t dims,
 	auto start = std::chrono::steady_clock::now();
 
 	for (int i = 0; i <= runs; i++)
+#if 0
 		matmul_prim.execute(engine_stream, matmul_args);
+#else
+		DnnlGemmWrapper::row_gemm(engine, engine_stream, oneapi::mkl::transpose::N, oneapi::mkl::transpose::T
+			, dims.m, dims.n, dims.k, a_in_mem.get_data_handle(), dims.k, type,
+			b_in_mem.get_data_handle(), dims.k, type, c_mem.get_data_handle(), dims.n, type);
+#endif
 	engine_stream.wait();
 
 	auto end = std::chrono::steady_clock::now();
