@@ -111,7 +111,7 @@ public:
 		memory::dims c_dims = { m, n };
 		using trans = oneapi::mkl::transpose;
 		const auto a_in_md = memory::desc(a_dims, at, a_trans == trans::N ? tag::ab : tag::ba);
-		const auto b_in_md = memory::desc(a_dims, bt, b_trans == trans::N ? tag::ab : tag::ba);
+		const auto b_in_md = memory::desc(b_dims, bt, b_trans == trans::N ? tag::ab : tag::ba);
 		const auto c_md = memory::desc(c_dims, ct, tag::ab);
 		auto a_mem = memory(a_in_md, eng, (void*)a);
 		auto b_mem = memory(b_in_md, eng, (void*)b);
