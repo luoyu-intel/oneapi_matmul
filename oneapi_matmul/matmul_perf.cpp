@@ -117,12 +117,10 @@ double run_case(engine::kind engine_kind, dt type, gemm_dims_t dims,
 
 	// Create memory descriptors and memory objects for src, weights, bias, and
 	// dst.
-	auto a_md = memory::desc(a_dims, type, tag::any);
-	auto b_md = memory::desc(b_dims, type, tag::any);
-	auto c_md = memory::desc(c_dims, type, tag::any);
+	auto c_md = memory::desc(c_dims, type, tag::ab);
 
-	auto a_in_md = memory::desc(a_dims, dt::f32, tag::ab);
-	auto b_in_md = memory::desc(b_dims, dt::f32, tag::ab);
+	auto a_in_md = memory::desc(a_dims, type, tag::ab);
+	auto b_in_md = memory::desc(b_dims, type, tag::ba);
 
 	auto a_in_mem = memory(a_in_md, engine);
 	auto b_in_mem = memory(b_in_md, engine);
@@ -132,7 +130,7 @@ double run_case(engine::kind engine_kind, dt type, gemm_dims_t dims,
 	write_to_dnnl_memory(b_data.data(), b_in_mem);
 
 	// Create primitive descriptor.
-	auto matmul_pd = matmul::primitive_desc(engine, a_md, b_md, c_md);
+	auto matmul_pd = matmul::primitive_desc(engine, a_in_md, b_in_md, c_md);
 
 	// Repack and convert input data.
 	auto a_mem = memory(matmul_pd.src_desc(), engine);
@@ -249,11 +247,11 @@ double run_mkl_case(gemm_dims_t dims, double time_limit = 0.) {
 
 	// Start output.
 	if (!quick_test) print_test_case(dt::f32, dims);
-	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::N, m, n, k, 1.f, a_buf, k, b_buf, n, 0.f
+	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, n, 0.f
 		, c_buf, n, oneapi::mkl::blas::compute_mode::prefer_alternate);
 	q.wait();
 	auto start_first = std::chrono::steady_clock::now();
-	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::N, m, n, k, 1.f, a_buf, k, b_buf, n, 0.f
+	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, n, 0.f
 		, c_buf, n, oneapi::mkl::blas::compute_mode::prefer_alternate);
 	q.wait();
 	auto end_first = std::chrono::steady_clock::now();
@@ -268,7 +266,7 @@ double run_mkl_case(gemm_dims_t dims, double time_limit = 0.) {
 	auto start = std::chrono::steady_clock::now();
 
 	for (int i = 0; i <= runs; i++)
-		oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::N, m, n, k, 1.f, a_buf, k, b_buf, n, 0.f
+		oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, n, 0.f
 			, c_buf, n, oneapi::mkl::blas::compute_mode::prefer_alternate);
 	q.wait();
 
@@ -376,7 +374,89 @@ void matmul_perf(engine::kind engine_kind, int argc, char** argv) {
 	run(engine_kind, dt::s8, dims, 2.0);
 }
 
+void run_check(engine::kind engine_kind, dt type, gemm_dims_t dims) {
+	bool is_integer = (type == dt::s8 || type == dt::u8);
+
+	// Create execution dnnl::engine.
+	dnnl::engine engine(engine_kind, 0);
+
+	// Create dnnl::stream.
+	dnnl::stream engine_stream(engine);
+
+	// Source (A), weights (B), and destination (C) matrix dimensions.
+	memory::dims a_dims = { dims.m, dims.k };
+	memory::dims b_dims = { dims.k, dims.n };
+	memory::dims c_dims = { dims.m, dims.n };
+
+	// Allocate buffers and random-initialize A/B
+	std::vector<float> a_data(product(a_dims));
+	std::vector<float> b_data(product(b_dims));
+	std::vector<float> c_data(product(c_dims));
+	std::vector<float> c_data_mkl(product(c_dims));
+
+	fill_random(a_data, is_integer);
+	fill_random(b_data, is_integer);
+
+	// Create memory descriptors and memory objects for src, weights, bias, and
+	// dst.
+	auto c_md = memory::desc(c_dims, type, tag::ab);
+
+	auto a_in_md = memory::desc(a_dims, dt::f32, tag::ab);
+	auto b_in_md = memory::desc(b_dims, dt::f32, tag::ba);
+
+	auto a_in_mem = memory(a_in_md, engine);
+	auto b_in_mem = memory(b_in_md, engine);
+
+	// Write data to memory object's handles.
+	write_to_dnnl_memory(a_data.data(), a_in_mem);
+	write_to_dnnl_memory(b_data.data(), b_in_mem);
+
+	// Create primitive descriptor.
+	auto matmul_pd = matmul::primitive_desc(engine, a_in_md, b_in_md, c_md);
+
+	auto c_mem = memory(matmul_pd.dst_desc(), engine);
+
+	// Create the primitive.
+	auto matmul_prim = matmul(matmul_pd);
+
+
+	// Primitive arguments.
+	std::unordered_map<int, memory> matmul_args;
+	matmul_args.insert({ DNNL_ARG_SRC, a_in_mem });
+	matmul_args.insert({ DNNL_ARG_WEIGHTS, b_in_mem });
+	matmul_args.insert({ DNNL_ARG_DST, c_mem });
+
+	// Warmup executions.
+	matmul_prim.execute(engine_stream, matmul_args);
+	engine_stream.wait();
+	read_from_dnnl_memory(c_data.data(), c_mem);
+
+	queue q = sycl_interop::get_queue(engine_stream);
+	int m = dims.m;
+	int n = dims.n;
+	int k = dims.k;
+	auto a_buf = malloc_device<float>(m * k, q);
+	auto b_buf = malloc_device<float>(n * k, q);
+	auto c_buf = malloc_device<float>(m * n, q);
+	using trans = oneapi::mkl::transpose;
+
+	q.memcpy(a_buf, a_data.data(), m * k * sizeof(float)).wait();
+	q.memcpy(b_buf, b_data.data(), n * k * sizeof(float)).wait();
+	q.memset(c_buf, 0, m * n * sizeof(float)).wait();
+	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, n, 0.f
+		, c_buf, n, oneapi::mkl::blas::compute_mode::prefer_alternate);
+	q.wait();
+	q.memcpy(c_data_mkl.data(), c_buf, n * m * sizeof(float)).wait();
+	double error = 0;
+	for (size_t i = 0; i < n * m; i++)
+	{
+		error += abs(c_data_mkl[i] - c_data[i]);
+	}
+	std::cout << "Error: " << error << std::endl;
+}
+
 int main(int argc, char** argv) {
+	run_check(engine::kind::gpu, dt::f32, { 1024,1024,1024 });
 	return handle_example_errors(
 		matmul_perf, parse_engine_kind(argc, argv, 3), argc, argv);
 }
