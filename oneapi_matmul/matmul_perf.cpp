@@ -242,10 +242,8 @@ double run_case(engine::kind engine_kind, dt type, gemm_dims_t dims,
 #if 0
 		matmul_prim.execute(engine_stream, matmul_args);
 #else
-		DnnlGemmWrapper::row_gemm(q, false, true
-			, dims.m, dims.n, dims.k, a_in_mem.get_data_handle(), type, b_in_mem.get_data_handle(), type, c_mem.get_data_handle(), type);
-		/*DnnlGemmWrapper::row_gemm(engine_stream, false, true
-			, dims.m, dims.n, dims.k, a_in_mem.get_data_handle(), type, b_in_mem.get_data_handle(), type, c_mem.get_data_handle(), type);*/
+		//DnnlGemmWrapper::row_gemm(q, false, true, dims.m, dims.n, dims.k, a_in_mem.get_data_handle(), type, b_in_mem.get_data_handle(), type, c_mem.get_data_handle(), type);
+		DnnlGemmWrapper::row_gemm(engine_stream, false, true, dims.m, dims.n, dims.k, a_in_mem.get_data_handle(), type, b_in_mem.get_data_handle(), type, c_mem.get_data_handle(), type);
 #endif
 	engine_stream.wait();
 
@@ -321,11 +319,11 @@ double run_mkl_case(gemm_dims_t dims, double time_limit = 0.) {
 
 	// Start output.
 	if (!quick_test) print_test_case(dt::f32, dims);
-	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, k, 0.f
+	oneapi::mkl::blas::column_major::gemm(q, trans::T, trans::N, n, m, k, 1.f, b_buf, k, a_buf, k, 0.f
 		, c_buf, n, oneapi::mkl::blas::compute_mode::prefer_alternate);
 	q.wait();
 	auto start_first = std::chrono::steady_clock::now();
-	oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, k, 0.f
+	oneapi::mkl::blas::column_major::gemm(q, trans::T, trans::N, n, m, k, 1.f, b_buf, k, a_buf, k, 0.f
 		, c_buf, n, oneapi::mkl::blas::compute_mode::prefer_alternate);
 	q.wait();
 	auto end_first = std::chrono::steady_clock::now();
@@ -340,7 +338,7 @@ double run_mkl_case(gemm_dims_t dims, double time_limit = 0.) {
 	auto start = std::chrono::steady_clock::now();
 
 	for (int i = 0; i <= runs; i++)
-		oneapi::mkl::blas::row_major::gemm(q, trans::N, trans::T, m, n, k, 1.f, a_buf, k, b_buf, k, 0.f
+		oneapi::mkl::blas::column_major::gemm(q, trans::T, trans::N, n, m, k, 1.f, b_buf, k, a_buf, k, 0.f
 			, c_buf, n, oneapi::mkl::blas::compute_mode::prefer_alternate);
 	q.wait();
 
