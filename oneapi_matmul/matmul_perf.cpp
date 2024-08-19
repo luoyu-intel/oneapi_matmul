@@ -102,10 +102,17 @@ public:
 		else static_assert(0);
 	}
 
-	static inline void row_gemm(const dnnl::engine& eng, dnnl::stream& stream, oneapi::mkl::transpose a_trans,
+	static inline void row_gemm(sycl::queue q, oneapi::mkl::transpose a_trans,
 		oneapi::mkl::transpose b_trans, int m, int n, int k,
 		const void* a, dt at, const void* b, dt bt, void* c, dt ct)
 	{
+		// Get the device associated with the queue
+		sycl::device dev = q.get_device();
+
+		// Get the context associated with the queue
+		sycl::context ctx = q.get_context();
+		const dnnl::engine eng = sycl_interop::make_engine(dev, ctx);
+		const dnnl::stream stream = sycl_interop::make_stream(eng, q);
 		memory::dims a_dims = { m, k };
 		memory::dims b_dims = { k, n };
 		memory::dims c_dims = { m, n };
@@ -203,12 +210,12 @@ double run_case(engine::kind engine_kind, dt type, gemm_dims_t dims,
 
 	// Timing runs.
 	auto start = std::chrono::steady_clock::now();
-
+	auto q = sycl_interop::get_queue(engine_stream);
 	for (int i = 0; i <= runs; i++)
 #if 0
 		matmul_prim.execute(engine_stream, matmul_args);
 #else
-		DnnlGemmWrapper::row_gemm(engine, engine_stream, oneapi::mkl::transpose::N, oneapi::mkl::transpose::T
+		DnnlGemmWrapper::row_gemm(q, oneapi::mkl::transpose::N, oneapi::mkl::transpose::T
 			, dims.m, dims.n, dims.k, a_in_mem.get_data_handle(), type, b_in_mem.get_data_handle(), type, c_mem.get_data_handle(), type);
 #endif
 	engine_stream.wait();
